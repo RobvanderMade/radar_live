@@ -3,7 +3,6 @@ import { onValue, ref } from 'firebase/database'
 import { getRtdb } from './firebase'
 import './App.css'
 
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1000
 const WINDOW_TICK_MS = Number(
   import.meta.env.VITE_WINDOW_TICK_MS ?? 3000,
 )
@@ -97,11 +96,22 @@ function formatClock(ms: number): string {
   return timeFmtNl.format(new Date(ms))
 }
 
-function formatTime(ms: number): string {
+function toDayKey(ms: number): string {
+  const dt = new Date(ms)
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, '0')
+  const d = String(dt.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function formatDayLabel(dayKey: string): string {
+  const dt = new Date(`${dayKey}T00:00:00`)
   return new Intl.DateTimeFormat('nl-NL', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
-  }).format(new Date(ms))
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(dt)
 }
 
 function PeaksTable({
@@ -158,6 +168,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [connected, setConnected] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), WINDOW_TICK_MS)
@@ -209,45 +220,102 @@ function App() {
     }
   }, [path, tsField])
 
-  const cutoff = now - FOUR_HOURS_MS
+  const todayKey = toDayKey(now)
 
-  const { inWindow, stale } = useMemo(() => {
-    const inWindow: Row[] = []
-    const stale: Row[] = []
+  const [selectedDay, setSelectedDay] = useState<string>(todayKey)
+
+  const { rowsWithTimestamp, rowsWithoutTimestamp, availableDays } = useMemo(() => {
+    const rowsWithTimestamp: Row[] = []
+    const rowsWithoutTimestamp: Row[] = []
+    const daySet = new Set<string>()
     for (const r of rows) {
       if (r.timestampMs == null) {
-        stale.push(r)
+        rowsWithoutTimestamp.push(r)
         continue
       }
-      if (r.timestampMs >= cutoff) inWindow.push(r)
-      else stale.push(r)
+      rowsWithTimestamp.push(r)
+      daySet.add(toDayKey(r.timestampMs))
     }
-    inWindow.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0))
-    return { inWindow, stale }
-  }, [rows, cutoff])
+    rowsWithTimestamp.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0))
+    rowsWithoutTimestamp.sort((a, b) => a.key.localeCompare(b.key))
+    const availableDays = [...daySet].sort((a, b) => b.localeCompare(a))
+    return { rowsWithTimestamp, rowsWithoutTimestamp, availableDays }
+  }, [rows])
 
-  const staleSorted = useMemo(() => {
-    return [...stale].sort((a, b) => {
-      const ta = a.timestampMs ?? Number.NEGATIVE_INFINITY
-      const tb = b.timestampMs ?? Number.NEGATIVE_INFINITY
-      return tb - ta
+  useEffect(() => {
+    if (selectedDay === todayKey) return
+    if (!availableDays.includes(selectedDay)) {
+      setSelectedDay(todayKey)
+    }
+  }, [availableDays, selectedDay, todayKey])
+
+  const rowsInSelectedDay = useMemo(() => {
+    return rowsWithTimestamp.filter((r) => {
+      if (r.timestampMs == null) return false
+      return toDayKey(r.timestampMs) === selectedDay
     })
-  }, [stale])
+  }, [rowsWithTimestamp, selectedDay])
+
+  const sortedRowsInSelectedDay = useMemo(() => {
+    const next = [...rowsInSelectedDay]
+    if (sortBy === 'speed') {
+      next.sort((a, b) => {
+        const sa = readSpeedKmh(a.value) ?? Number.NEGATIVE_INFINITY
+        const sb = readSpeedKmh(b.value) ?? Number.NEGATIVE_INFINITY
+        if (sb !== sa) return sb - sa
+        return (b.timestampMs ?? 0) - (a.timestampMs ?? 0)
+      })
+      return next
+    }
+    next.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0))
+    return next
+  }, [rowsInSelectedDay, sortBy])
+
+  const otherDays = useMemo(
+    () => availableDays.filter((d) => d !== todayKey),
+    [availableDays, todayKey],
+  )
+
+  const speedRecordToday = useMemo(() => {
+    let max: number | null = null
+    for (const r of rowsWithTimestamp) {
+      if (r.timestampMs == null || toDayKey(r.timestampMs) !== todayKey) continue
+      const speed = readSpeedKmh(r.value)
+      if (speed == null) continue
+      if (max == null || speed > max) max = speed
+    }
+    return max
+  }, [rowsWithTimestamp, todayKey])
+
+  const speedRecordAllTime = useMemo(() => {
+    let max: number | null = null
+    for (const r of rowsWithTimestamp) {
+      const speed = readSpeedKmh(r.value)
+      if (speed == null) continue
+      if (max == null || speed > max) max = speed
+    }
+    return max
+  }, [rowsWithTimestamp])
 
   return (
     <div className="app">
       <header className="header">
-        <div>
-          <h1>RTDB dashboard</h1>
-          <p className="subtitle">
-            Pad <code>{path}</code> · sortering op{' '}
-            <code>stored_at_utc</code> / <code>timestamp_peak</code> /{' '}
-            <code>{tsField}</code> · venster <strong>laatste 4 uur</strong> ·
-            tick {WINDOW_TICK_MS / 1000}s
-          </p>
+        <div className="brand">
+          <div className="radar-logo" aria-hidden="true">
+            <span className="radar-ring ring-1" />
+            <span className="radar-ring ring-2" />
+            <span className="radar-dot" />
+            <span className="radar-beam" />
+          </div>
+          <div>
+            <h1>Radar Live</h1>
+            <p className="brand-tagline">Realtime snelheidsmonitor</p>
+          </div>
         </div>
-        <div className={`pill ${connected ? 'on' : 'off'}`}>
-          {connected ? 'Verbonden' : 'Niet verbonden'}
+        <div className="header-meta">
+          <div className={`pill ${connected ? 'on' : 'off'}`}>
+            {connected ? 'Verbonden' : 'Niet verbonden'}
+          </div>
         </div>
       </header>
 
@@ -262,40 +330,91 @@ function App() {
       <section className="panel">
         <div className="panel-head">
           <h2>
-            Pieken in venster{' '}
-            <span className="count">{inWindow.length}</span>
+            {selectedDay === todayKey ? (
+              <>
+                Vandaag ({formatDate(now)}) ·{' '}
+                <span className="count">{sortedRowsInSelectedDay.length}</span>{' '}
+                metingen boven 30 km/u
+              </>
+            ) : (
+              <>
+                {formatDayLabel(selectedDay)} ·{' '}
+                <span className="count">{sortedRowsInSelectedDay.length}</span>{' '}
+                metingen boven 30 km/u
+              </>
+            )}
           </h2>
-          <p className="muted small">
-            Updates komen binnen via Firebase <code>onValue</code> (live). Het
-            tijdsvenster schuift elke paar seconden mee.
-          </p>
+          <div className="records">
+            <p className="record-pill">
+              Snelheidsrecord vandaag:{' '}
+              <strong>
+                {speedRecordToday != null
+                  ? `${speedRecordToday.toLocaleString('nl-NL')} km/u`
+                  : '—'}
+              </strong>
+            </p>
+            <p className="record-pill">
+              Snelheidsrecord aller tijden:{' '}
+              <strong>
+                {speedRecordAllTime != null
+                  ? `${speedRecordAllTime.toLocaleString('nl-NL')} km/u`
+                  : '—'}
+              </strong>
+            </p>
+          </div>
+          <div className="day-filter">
+            <label htmlFor="day-select">Andere dag</label>
+            <select
+              id="day-select"
+              value={selectedDay}
+              onChange={(e) => setSelectedDay(e.target.value)}
+            >
+              <option value={todayKey}>Vandaag ({formatDate(now)})</option>
+              {otherDays.map((day) => (
+                <option key={day} value={day}>
+                  {formatDayLabel(day)}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="sort-select">Sorteer op</label>
+            <select
+              id="sort-select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'time' | 'speed')}
+            >
+              <option value="time">Tijd (nieuwste eerst)</option>
+              <option value="speed">Snelheid (hoogste eerst)</option>
+            </select>
+          </div>
         </div>
 
         {!loading && (
           <PeaksTable
-            rows={inWindow}
-            emptyHint={`Geen pieken met bekende tijd ≥ ${formatTime(cutoff)}.`}
+            rows={sortedRowsInSelectedDay}
+            emptyHint={`Geen pieken met bekende tijd op ${
+              selectedDay === todayKey
+                ? `vandaag (${formatDate(now)})`
+                : formatDayLabel(selectedDay)
+            }.`}
           />
         )}
       </section>
 
-      {stale.length > 0 && (
+      {rowsWithoutTimestamp.length > 0 && (
         <section className="panel muted-panel">
           <h3>
-            Buiten venster of zonder tijdstempel{' '}
-            <span className="count">{stale.length}</span>
+            Zonder bruikbare tijdstempel{' '}
+            <span className="count">{rowsWithoutTimestamp.length}</span>
           </h3>
           <p className="muted small">
-            Ouder dan 4 uur of zonder bruikbare tijd (<code>
-              stored_at_utc
-            </code>
-            , <code>timestamp_peak</code> of <code>{tsField}</code>) — niet in
-            hoofdtabel.
+            Deze records missen <code>stored_at_utc</code>,{' '}
+            <code>timestamp_peak</code> en <code>{tsField}</code>, en kunnen
+            daarom niet op dag gefilterd worden.
           </p>
-          <PeaksTable rows={staleSorted.slice(0, 12)} />
-          {stale.length > 12 && (
+          <PeaksTable rows={rowsWithoutTimestamp.slice(0, 12)} />
+          {rowsWithoutTimestamp.length > 12 && (
             <p className="muted small stale-more">
-              … en {stale.length - 12} meer
+              … en {rowsWithoutTimestamp.length - 12} meer
             </p>
           )}
         </section>
