@@ -349,6 +349,28 @@ function App() {
         </div>
       )}
 
+      {!loading && !error && rows.length === 0 && (
+        <div className="banner info" role="status">
+          Er komen geen events binnen op RTDB-pad <code>{path}</code>. Lokaal
+          staat dat in <code>VITE_RTDB_PATH</code>; op Vercel moet dezelfde
+          waarde in de build staan (variabele zetten en opnieuw deployen).
+        </div>
+      )}
+
+      {!loading &&
+        !error &&
+        rows.length > 0 &&
+        sortedRowsInSelectedDay.length === 0 && (
+          <div className="banner info" role="status">
+            Er zijn {rows.length} event(s) geladen, maar geen op{' '}
+            {selectedDay === todayKey
+              ? `vandaag (${formatDate(now)})`
+              : formatDayLabel(selectedDay)}{' '}
+            met een bruikbare tijd. Probeer <strong>Andere dag</strong>, of
+            kijk hieronder bij <strong>Zonder bruikbare tijdstempel</strong>.
+          </div>
+        )}
+
       {loading && <p className="muted">Bezig met laden…</p>}
 
       <section className="panel">

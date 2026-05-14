@@ -141,6 +141,16 @@
   color: var(--text-h);
 }
 
+.banner.info {
+  border-color: color-mix(in srgb, #3b82f6 40%, var(--border));
+  background: color-mix(in srgb, #3b82f6 10%, transparent);
+  color: var(--text-h);
+}
+
+.banner.info code {
+  font-size: 0.92em;
+}
+
 .muted {
   color: var(--text);
 }
