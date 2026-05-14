@@ -21,7 +21,7 @@ function readTsField(): string {
 
 function readPath(): string {
   const p = import.meta.env.VITE_RTDB_PATH?.trim()
-  return p && p.length > 0 ? p : 'radar/peaks'
+  return p && p.length > 0 ? p : 'ld2451/events'
 }
 
 function toMillis(ts: unknown): number | null {
@@ -29,6 +29,26 @@ function toMillis(ts: unknown): number | null {
   if (ts > 1e12) return ts
   if (ts > 1e9) return ts * 1000
   return ts
+}
+
+/** LD2451: `datum` "2026-05-14" + `tijd` "15:01:12.332" — lokale tijd */
+function parseDatumTijdLocal(datum: string, tijd: string): number | null {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datum.trim())
+  const tm = /^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/.exec(tijd.trim())
+  if (!dm || !tm) return null
+  const [, y, mo, d] = dm
+  const [, h, mi, sec, frac] = tm
+  const ms = frac != null ? Number(String(frac).padEnd(3, '0').slice(0, 3)) : 0
+  const t = new Date(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h),
+    Number(mi),
+    Number(sec),
+    ms,
+  )
+  return Number.isFinite(t.getTime()) ? t.getTime() : null
 }
 
 /** `timestamp_peak` zoals "2026-05-08 22:24:06" — lokale wandtijd */
@@ -53,6 +73,10 @@ function extractTimestampMs(val: RawRow, tsField: string): number | null {
     const ms = Date.parse(val.stored_at_utc)
     if (Number.isFinite(ms)) return ms
   }
+  if (typeof val.datum === 'string' && typeof val.tijd === 'string') {
+    const ms = parseDatumTijdLocal(val.datum, val.tijd)
+    if (ms != null) return ms
+  }
   if (typeof val.timestamp_peak === 'string') {
     const ms = parseTimestampPeakLocal(val.timestamp_peak)
     if (ms != null) return ms
@@ -67,7 +91,7 @@ function extractTimestampMs(val: RawRow, tsField: string): number | null {
 }
 
 function readSpeedKmh(val: RawRow): number | null {
-  const v = val.peak_speed_kmh
+  const v = val.snelheid_kmh ?? val.peak_speed_kmh
   if (typeof v === 'number' && Number.isFinite(v)) return v
   if (typeof v === 'string') {
     const n = Number(v.trim())
@@ -77,7 +101,7 @@ function readSpeedKmh(val: RawRow): number | null {
 }
 
 function readDirection(val: RawRow): string | null {
-  const v = val.direction
+  const v = val.richting ?? val.direction
   if (typeof v === 'string') {
     const s = v.trim()
     return s.length > 0 ? s : null
@@ -407,9 +431,10 @@ function App() {
             <span className="count">{rowsWithoutTimestamp.length}</span>
           </h3>
           <p className="muted small">
-            Deze records missen <code>stored_at_utc</code>,{' '}
-            <code>timestamp_peak</code> en <code>{tsField}</code>, en kunnen
-            daarom niet op dag gefilterd worden.
+            Deze records missen <code>datum</code>+<code>tijd</code>,{' '}
+            <code>stored_at_utc</code>, <code>timestamp_peak</code> en{' '}
+            <code>{tsField}</code>, en kunnen daarom niet op dag gefilterd
+            worden.
           </p>
           <PeaksTable rows={rowsWithoutTimestamp.slice(0, 12)} />
           {rowsWithoutTimestamp.length > 12 && (
