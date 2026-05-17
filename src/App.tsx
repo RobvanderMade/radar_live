@@ -386,7 +386,7 @@ function App() {
               <>
                 {formatDayLabel(selectedDay)} ·{' '}
                 <span className="count">{sortedRowsInSelectedDay.length}</span>{' '}
-                metingen boven 30 km/u
+                metingen boven 35 km/u
               </>
             )}
           </h2>
