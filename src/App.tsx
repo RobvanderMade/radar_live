@@ -169,8 +169,8 @@ function PeaksTable({
           <tr>
             <th>Datum</th>
             <th>Tijd</th>
-            <th>Richting</th>
             <th className="num">Snelheid</th>
+            <th>Richting</th>
           </tr>
         </thead>
         <tbody>
@@ -182,12 +182,12 @@ function PeaksTable({
               <tr key={r.key}>
                 <td>{ms != null ? formatDate(ms) : '—'}</td>
                 <td>{ms != null ? formatClock(ms) : '—'}</td>
-                <td>{direction ?? '—'}</td>
                 <td className="num">
                   {speed != null
                     ? `${speed.toLocaleString('nl-NL')} km/h`
                     : '—'}
                 </td>
+                <td>{direction ?? '—'}</td>
               </tr>
             )
           })}
