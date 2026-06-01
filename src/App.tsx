@@ -16,12 +16,12 @@ type Row = {
 }
 
 function readTsField(): string {
-  return import.meta.env.VITE_RTDB_TS_FIELD?.trim() || 'timestamp'
+  return import.meta.env.VITE_RTDB_TS_FIELD?.trim() || 'ts'
 }
 
 function readPath(): string {
   const p = import.meta.env.VITE_RTDB_PATH?.trim()
-  return p && p.length > 0 ? p : 'ld2451/events'
+  return p && p.length > 0 ? p : 'ld2451/scanner/events'
 }
 
 function toMillis(ts: unknown): number | null {
@@ -68,10 +68,26 @@ function parseTimestampPeakLocal(s: string): number | null {
   return Number.isFinite(t.getTime()) ? t.getTime() : null
 }
 
+function parseIsoTimestamp(s: string): number | null {
+  const ms = Date.parse(s.trim())
+  return Number.isFinite(ms) ? ms : null
+}
+
 function extractTimestampMs(val: RawRow, tsField: string): number | null {
+  const configured = val[tsField]
+  if (typeof configured === 'string') {
+    const ms = parseIsoTimestamp(configured)
+    if (ms != null) return ms
+  }
+  if (typeof val.ts === 'string') {
+    const ms = parseIsoTimestamp(val.ts)
+    if (ms != null) return ms
+  }
+  const direct = toMillis(configured)
+  if (direct != null) return direct
   if (typeof val.stored_at_utc === 'string') {
-    const ms = Date.parse(val.stored_at_utc)
-    if (Number.isFinite(ms)) return ms
+    const ms = parseIsoTimestamp(val.stored_at_utc)
+    if (ms != null) return ms
   }
   if (typeof val.datum === 'string' && typeof val.tijd === 'string') {
     const ms = parseDatumTijdLocal(val.datum, val.tijd)
@@ -81,8 +97,6 @@ function extractTimestampMs(val: RawRow, tsField: string): number | null {
     const ms = parseTimestampPeakLocal(val.timestamp_peak)
     if (ms != null) return ms
   }
-  const direct = toMillis(val[tsField])
-  if (direct != null) return direct
   const alt =
     toMillis(val.createdAt) ??
     toMillis(val.ts) ??
@@ -91,7 +105,7 @@ function extractTimestampMs(val: RawRow, tsField: string): number | null {
 }
 
 function readSpeedKmh(val: RawRow): number | null {
-  const v = val.snelheid_kmh ?? val.peak_speed_kmh
+  const v = val.speed_kmh ?? val.snelheid_kmh ?? val.peak_speed_kmh
   if (typeof v === 'number' && Number.isFinite(v)) return v
   if (typeof v === 'string') {
     const n = Number(v.trim())
@@ -101,7 +115,7 @@ function readSpeedKmh(val: RawRow): number | null {
 }
 
 function readDirection(val: RawRow): string | null {
-  const v = val.richting ?? val.direction
+  const v = val.direction ?? val.richting
   if (typeof v === 'string') {
     const s = v.trim()
     return s.length > 0 ? s : null
@@ -453,9 +467,10 @@ function App() {
             <span className="count">{rowsWithoutTimestamp.length}</span>
           </h3>
           <p className="muted small">
-            Deze records missen <code>datum</code>+<code>tijd</code>,{' '}
-            <code>stored_at_utc</code>, <code>timestamp_peak</code> en{' '}
-            <code>{tsField}</code>, en kunnen daarom niet op dag gefilterd
+            Deze records missen een bruikbare tijd (bijv.{' '}
+            <code>ts</code> ISO, <code>datum</code>+<code>tijd</code>,{' '}
+            <code>stored_at_utc</code>, <code>timestamp_peak</code> of{' '}
+            <code>{tsField}</code>) en kunnen daarom niet op dag gefilterd
             worden.
           </p>
           <PeaksTable rows={rowsWithoutTimestamp.slice(0, 12)} />
