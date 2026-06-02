@@ -190,89 +190,17 @@
 .records {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 1.5rem 2rem;
-  margin: 0.85rem 0 0.35rem;
-  padding: 0.85rem 1rem;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.25rem;
 }
 
-.speed-record {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 5.5rem;
-}
-
-.speed-record-label {
+.record-pill {
   margin: 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text);
-  text-align: center;
-  line-height: 1.25;
-}
-
-.speed-sign {
-  --sign-size: 4.75rem;
-  width: var(--sign-size);
-  height: var(--sign-size);
-  border-radius: 50%;
-  border: 0.32rem solid #e10600;
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.14),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.05);
-}
-
-.speed-sign--prominent {
-  --sign-size: 5.5rem;
-  border-width: 0.38rem;
-  box-shadow:
-    0 8px 22px rgba(225, 6, 0, 0.18),
-    0 6px 18px rgba(0, 0, 0, 0.12),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.05);
-}
-
-.speed-sign--empty {
-  border-color: color-mix(in srgb, #e10600 45%, var(--border));
-  background: color-mix(in srgb, #fff 70%, var(--border));
-}
-
-.speed-sign--empty .speed-sign-value {
-  color: var(--text);
-  opacity: 0.45;
-  font-size: 1.6rem;
-}
-
-.speed-sign-value {
-  font-size: clamp(1.35rem, 4vw, 1.85rem);
-  font-weight: 800;
-  line-height: 1;
-  color: #111;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.05em;
-  user-select: none;
-}
-
-.speed-sign--prominent .speed-sign-value {
-  font-size: clamp(1.55rem, 4.5vw, 2.15rem);
-}
-
-.speed-record-unit {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--text) 65%, transparent);
+  padding: 0.38rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--border));
+  font-size: 0.86rem;
 }
 
 .day-filter {
@@ -498,17 +426,13 @@
   }
 
   .records {
-    justify-content: center;
-    gap: 1.25rem 1.75rem;
-    padding: 0.75rem 0.65rem;
+    flex-direction: column;
+    gap: 0.4rem;
   }
 
-  .speed-sign {
-    --sign-size: 4.25rem;
-  }
-
-  .speed-sign--prominent {
-    --sign-size: 4.85rem;
+  .record-pill {
+    border-radius: 10px;
+    padding: 0.42rem 0.55rem;
   }
 
   .day-filter {
