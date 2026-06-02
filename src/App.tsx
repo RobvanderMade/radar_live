@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { onValue, ref } from 'firebase/database'
+import { limitToLast, onValue, orderByKey, query, ref } from 'firebase/database'
 import { getRtdb } from './firebase'
 import './App.css'
 
 const WINDOW_TICK_MS = Number(
   import.meta.env.VITE_WINDOW_TICK_MS ?? 3000,
 )
+const LOAD_TIMEOUT_MS = 15_000
+
+type ConnState = 'connecting' | 'connected' | 'offline'
 
 type RawRow = Record<string, unknown>
 
@@ -22,6 +25,14 @@ function readTsField(): string {
 function readPath(): string {
   const p = import.meta.env.VITE_RTDB_PATH?.trim()
   return p && p.length > 0 ? p : 'ld2451/scanner/events'
+}
+
+function readEventLimit(): number {
+  const raw = import.meta.env.VITE_RTDB_EVENT_LIMIT
+  const n =
+    raw != null && String(raw).trim() !== '' ? Number(raw) : 500
+  if (!Number.isFinite(n) || n < 1) return 500
+  return Math.min(Math.floor(n), 5000)
 }
 
 function toMillis(ts: unknown): number | null {
@@ -200,11 +211,13 @@ function PeaksTable({
 function App() {
   const path = readPath()
   const tsField = readTsField()
+  const eventLimit = readEventLimit()
 
   const [rows, setRows] = useState<Row[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [connected, setConnected] = useState(false)
+  const [loadTimedOut, setLoadTimedOut] = useState(false)
+  const [connState, setConnState] = useState<ConnState>('connecting')
   const [now, setNow] = useState(() => Date.now())
   const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
 
@@ -216,19 +229,34 @@ function App() {
 
   useEffect(() => {
     let unsubConnected: (() => void) | undefined
+    let unsubData: (() => void) | undefined
+    setLoading(true)
+    setLoadTimedOut(false)
+    setError(null)
+    setConnState('connecting')
+
+    const timeoutId = window.setTimeout(() => {
+      setLoadTimedOut(true)
+    }, LOAD_TIMEOUT_MS)
+
     try {
       const db = getRtdb()
       const metaRef = ref(db, '.info/connected')
       unsubConnected = onValue(metaRef, (snap) => {
-        setConnected(!!snap.val())
+        setConnState(snap.val() ? 'connected' : 'offline')
       })
 
-      const dataRef = ref(db, path)
-      const unsubData = onValue(
-        dataRef,
+      const eventsQuery = query(
+        ref(db, path),
+        orderByKey(),
+        limitToLast(eventLimit),
+      )
+      unsubData = onValue(
+        eventsQuery,
         (snapshot) => {
           setError(null)
           setLoading(false)
+          setLoadTimedOut(false)
           const next: Row[] = []
           snapshot.forEach((child) => {
             const value = (child.val() ?? {}) as RawRow
@@ -242,22 +270,28 @@ function App() {
         },
         (err) => {
           setLoading(false)
+          setLoadTimedOut(false)
           setError(err.message)
         },
       )
 
       return () => {
+        window.clearTimeout(timeoutId)
         unsubConnected?.()
-        unsubData()
+        unsubData?.()
       }
     } catch (e) {
+      window.clearTimeout(timeoutId)
       setLoading(false)
+      setLoadTimedOut(false)
+      setConnState('offline')
       setError(e instanceof Error ? e.message : String(e))
       return () => {
         unsubConnected?.()
+        unsubData?.()
       }
     }
-  }, [path, tsField])
+  }, [path, tsField, eventLimit])
 
   const todayKey = toDayKey(now)
 
@@ -355,8 +389,20 @@ function App() {
           <time className="header-clock" dateTime={new Date(now).toISOString()}>
             {formatClock(now)}
           </time>
-          <div className={`pill ${connected ? 'on' : 'off'}`}>
-            {connected ? 'Verbonden' : 'Niet verbonden'}
+          <div
+            className={`pill ${
+              connState === 'connected'
+                ? 'on'
+                : connState === 'connecting'
+                  ? 'pending'
+                  : 'off'
+            }`}
+          >
+            {connState === 'connected'
+              ? 'Verbonden'
+              : connState === 'connecting'
+                ? 'Verbinden…'
+                : 'Offline'}
           </div>
         </div>
       </header>
@@ -364,6 +410,14 @@ function App() {
       {error && (
         <div className="banner error" role="alert">
           {error}
+        </div>
+      )}
+
+      {loadTimedOut && loading && !error && (
+        <div className="banner warn" role="status">
+          Laden duurt langer dan verwacht. Controleer je internet en of{' '}
+          <code>VITE_RTDB_PATH</code> ({path}) klopt. Er worden maximaal{' '}
+          {eventLimit} recente metingen opgehaald.
         </div>
       )}
 
@@ -393,6 +447,9 @@ function App() {
 
       <section className="panel">
         <div className="panel-head">
+          <p className="muted small panel-hint">
+            Laatste {eventLimit} metingen (nieuwste eerst in de lijst)
+          </p>
           <h2>
             {selectedDay === todayKey ? (
               <>
