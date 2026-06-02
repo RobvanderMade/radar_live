@@ -209,7 +209,8 @@ function App() {
   const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), WINDOW_TICK_MS)
+    const tickMs = Math.min(1000, WINDOW_TICK_MS)
+    const id = window.setInterval(() => setNow(Date.now()), tickMs)
     return () => window.clearInterval(id)
   }, [])
 
@@ -346,11 +347,14 @@ function App() {
             <span className="radar-beam" />
           </div>
           <div>
-            <h1>Radar Live</h1>
+            <h1>Geestweg Live</h1>
             <p className="brand-tagline">Realtime snelheidsmonitor</p>
           </div>
         </div>
         <div className="header-meta">
+          <time className="header-clock" dateTime={new Date(now).toISOString()}>
+            {formatClock(now)}
+          </time>
           <div className={`pill ${connected ? 'on' : 'off'}`}>
             {connected ? 'Verbonden' : 'Niet verbonden'}
           </div>
