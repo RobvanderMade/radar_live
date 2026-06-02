@@ -152,6 +152,37 @@ function formatDayLabel(dayKey: string): string {
   }).format(dt)
 }
 
+function SpeedRecordSign({
+  label,
+  speedKmh,
+  prominent = false,
+}: {
+  label: string
+  speedKmh: number | null
+  prominent?: boolean
+}) {
+  const display =
+    speedKmh != null ? String(Math.round(speedKmh)) : '—'
+  const aria =
+    speedKmh != null
+      ? `${label}: ${Math.round(speedKmh)} kilometer per uur`
+      : `${label}: geen meting`
+
+  return (
+    <div className="speed-record">
+      <p className="speed-record-label">{label}</p>
+      <div
+        className={`speed-sign${prominent ? ' speed-sign--prominent' : ''}${speedKmh == null ? ' speed-sign--empty' : ''}`}
+        role="img"
+        aria-label={aria}
+      >
+        <span className="speed-sign-value">{display}</span>
+      </div>
+      <span className="speed-record-unit">km/u</span>
+    </div>
+  )
+}
+
 function PeaksTable({
   rows,
   emptyHint,
@@ -409,22 +440,15 @@ function App() {
             )}
           </h2>
           <div className="records">
-            <p className="record-pill">
-              Snelheidsrecord vandaag:{' '}
-              <strong>
-                {speedRecordToday != null
-                  ? `${speedRecordToday.toLocaleString('nl-NL')} km/u`
-                  : '—'}
-              </strong>
-            </p>
-            <p className="record-pill">
-              Snelheidsrecord aller tijden:{' '}
-              <strong>
-                {speedRecordAllTime != null
-                  ? `${speedRecordAllTime.toLocaleString('nl-NL')} km/u`
-                  : '—'}
-              </strong>
-            </p>
+            <SpeedRecordSign
+              label="Record vandaag"
+              speedKmh={speedRecordToday}
+            />
+            <SpeedRecordSign
+              label="Record aller tijden"
+              speedKmh={speedRecordAllTime}
+              prominent
+            />
           </div>
           <div className="day-filter">
             <label htmlFor="day-select">Andere dag</label>
