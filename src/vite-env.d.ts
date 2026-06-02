@@ -10,7 +10,6 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_APP_ID: string
   readonly VITE_RTDB_PATH?: string
   readonly VITE_RTDB_TS_FIELD?: string
-  readonly VITE_RTDB_EVENT_LIMIT?: string
   readonly VITE_WINDOW_TICK_MS?: string
 }
 
