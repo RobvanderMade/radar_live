@@ -1,5 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { onValue, ref } from 'firebase/database'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  endAt,
+  onValue,
+  orderByChild,
+  query,
+  ref,
+  runTransaction,
+  set,
+  startAt,
+  type Database,
+} from 'firebase/database'
 import { getRtdb } from './firebase'
 import './App.css'
 
@@ -22,6 +32,79 @@ function readTsField(): string {
 function readPath(): string {
   const p = import.meta.env.VITE_RTDB_PATH?.trim()
   return p && p.length > 0 ? p : 'ld2451/scanner/events'
+}
+
+function readStatsBasePath(): string {
+  const custom = import.meta.env.VITE_RTDB_STATS_PATH?.trim()
+  if (custom && custom.length > 0) return custom
+  const eventsPath = readPath().replace(/\/$/, '')
+  if (eventsPath.endsWith('/events')) {
+    return `${eventsPath.slice(0, -'/events'.length)}/stats`
+  }
+  return 'ld2451/scanner/stats'
+}
+
+function parseStoredDayFine(val: unknown): number {
+  if (val == null || typeof val !== 'object') return 0
+  const n = Number((val as Record<string, unknown>).totalFineEur)
+  return Number.isFinite(n) ? n : 0
+}
+
+async function persistDayStatsToFirebase(
+  db: Database,
+  statsBase: string,
+  dayKey: string,
+  stats: DayStats,
+): Promise<void> {
+  await set(ref(db, `${statsBase}/days/${dayKey}`), {
+    totalFineEur: stats.totalFineEur,
+    maxSpeedKmh: stats.maxSpeed,
+    updatedAt: new Date().toISOString(),
+  })
+
+  if (stats.maxSpeed != null) {
+    const recordRef = ref(db, `${statsBase}/recordAllTimeKmh`)
+    await runTransaction(recordRef, (current) => {
+      const cur =
+        typeof current === 'number' && Number.isFinite(current) ? current : null
+      if (cur == null || stats.maxSpeed! > cur) return stats.maxSpeed
+      return cur
+    })
+  }
+}
+
+const SELECTABLE_DAY_COUNT = 90
+
+type DayStats = {
+  maxSpeed: number | null
+  totalFineEur: number
+}
+
+function tsQueryBoundsForDay(dayKey: string): { start: string; end: string } {
+  return { start: dayKey, end: `${dayKey}\uf8ff` }
+}
+
+function buildSelectableDays(anchorMs: number): string[] {
+  const keys: string[] = []
+  for (let i = 0; i < SELECTABLE_DAY_COUNT; i++) {
+    const d = new Date(anchorMs)
+    d.setHours(12, 0, 0, 0)
+    d.setDate(d.getDate() - i)
+    keys.push(toDayKey(d.getTime()))
+  }
+  return keys
+}
+
+function computeDayStatsFromRows(rows: Row[]): DayStats {
+  let maxSpeed: number | null = null
+  let totalFineEur = 0
+  for (const r of rows) {
+    const speed = readSpeedKmh(r.value)
+    if (speed == null) continue
+    if (maxSpeed == null || speed > maxSpeed) maxSpeed = speed
+    totalFineEur += fineEurForSpeedKmh(speed)
+  }
+  return { maxSpeed, totalFineEur }
 }
 
 function toMillis(ts: unknown): number | null {
@@ -237,21 +320,6 @@ function toMonthKey(ms: number): string {
   return `${y}-${m}`
 }
 
-function sumFineEur(rows: Row[], match?: { dayKey?: string; monthKey?: string }): number {
-  let sum = 0
-  for (const r of rows) {
-    if (r.timestampMs == null) continue
-    if (match?.dayKey != null && toDayKey(r.timestampMs) !== match.dayKey) continue
-    if (match?.monthKey != null && toMonthKey(r.timestampMs) !== match.monthKey) {
-      continue
-    }
-    const speed = readSpeedKmh(r.value)
-    if (speed == null) continue
-    sum += fineEurForSpeedKmh(speed)
-  }
-  return sum
-}
-
 function formatDayLabel(dayKey: string): string {
   const dt = new Date(`${dayKey}T00:00:00`)
   return new Intl.DateTimeFormat('nl-NL', {
@@ -265,9 +333,10 @@ function formatDayLabel(dayKey: string): string {
 const INFO_PARAGRAPHS = [
   'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Nieuwe passages vanaf een gemeten snelheid van 35 km/u verschijnen live.',
   'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid en kies via “Andere dag” een andere kalenderdag.',
-  'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag. Het record aller tijden is het maximum over alle geladen metingen.',
+  'Het record van de dag en het boetebedrag van de dag gelden voor de gekozen kalenderdag. Na elke update worden dagtotalen in Firebase opgeslagen.',
+  'Het record aller tijden staat in Firebase en wordt alleen vervangen als er een hogere snelheid wordt gemeten. Het boetebedrag deze maand is de som van opgeslagen dagbedragen in Firebase voor de lopende maand.',
   'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
-  '“Boetebedrag van de dag” en “Boetebedrag deze maand” tellen de indicatieve bedragen op voor de geselecteerde dag respectievelijk de lopende kalendermaand.',
+  'Per dag worden alleen de metingen van die dag opgehaald (sneller laden). Kies een dag via “Andere dag” (laatste 90 dagen).',
   'De status “Verbonden” betekent dat de app live verbonden is met de radar en nieuwe events ontvangt. Bij “Niet verbonden” worden geen nieuwe events ontvangen.',
   'De metingen en resultaten zijn slechts indicatief, niet bedoeld voor handhaving en zonder verdere gevolgen of juridische onderbouwing.',
 ]
@@ -372,6 +441,7 @@ function PeaksTable({
 function App() {
   const path = readPath()
   const tsField = readTsField()
+  const statsBase = readStatsBasePath()
 
   const [rows, setRows] = useState<Row[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -380,6 +450,40 @@ function App() {
   const [now, setNow] = useState(() => Date.now())
   const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
   const [infoOpen, setInfoOpen] = useState(false)
+  const [recordAllTimeKmh, setRecordAllTimeKmh] = useState<number | null>(null)
+  const [monthFineTotalEur, setMonthFineTotalEur] = useState(0)
+
+  const todayKey = toDayKey(now)
+  const [selectedDay, setSelectedDay] = useState<string>(todayKey)
+
+  const selectableDays = useMemo(() => buildSelectableDays(now), [now])
+  const otherDays = useMemo(
+    () => selectableDays.filter((d) => d !== todayKey),
+    [selectableDays, todayKey],
+  )
+
+  const pushDayStatsToFirebase = useCallback(
+    (dayKey: string, data: Row[]) => {
+      const stats = computeDayStatsFromRows(data)
+      const db = getRtdb()
+      void persistDayStatsToFirebase(db, statsBase, dayKey, stats).catch((e) => {
+        console.error('Firebase stats schrijven mislukt:', e)
+      })
+      return stats
+    },
+    [statsBase],
+  )
+
+  const selectDay = useCallback(
+    (newDay: string) => {
+      if (newDay === selectedDay) return
+      if (rows.length > 0) pushDayStatsToFirebase(selectedDay, rows)
+      setSelectedDay(newDay)
+      setLoading(true)
+      setRows([])
+    },
+    [selectedDay, rows, pushDayStatsToFirebase],
+  )
 
   useEffect(() => {
     const tickMs = Math.min(1000, WINDOW_TICK_MS)
@@ -388,7 +492,46 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!selectableDays.includes(selectedDay)) {
+      setSelectedDay(todayKey)
+    }
+  }, [selectableDays, selectedDay, todayKey])
+
+  useEffect(() => {
+    const db = getRtdb()
+    const monthKey = toMonthKey(now)
+
+    const unsubRecord = onValue(
+      ref(db, `${statsBase}/recordAllTimeKmh`),
+      (snap) => {
+        const v = snap.val()
+        setRecordAllTimeKmh(
+          typeof v === 'number' && Number.isFinite(v) ? v : null,
+        )
+      },
+    )
+
+    const unsubDays = onValue(ref(db, `${statsBase}/days`), (snap) => {
+      let sum = 0
+      snap.forEach((child) => {
+        const key = child.key
+        if (key == null || !key.startsWith(monthKey)) return
+        sum += parseStoredDayFine(child.val())
+      })
+      setMonthFineTotalEur(sum)
+    })
+
+    return () => {
+      unsubRecord()
+      unsubDays()
+    }
+  }, [statsBase, now])
+
+  useEffect(() => {
     let unsubConnected: (() => void) | undefined
+    let unsubData: (() => void) | undefined
+    setLoading(true)
+
     try {
       const db = getRtdb()
       const metaRef = ref(db, '.info/connected')
@@ -396,9 +539,16 @@ function App() {
         setConnected(!!snap.val())
       })
 
-      const dataRef = ref(db, path)
-      const unsubData = onValue(
-        dataRef,
+      const { start, end } = tsQueryBoundsForDay(selectedDay)
+      const dayQuery = query(
+        ref(db, path),
+        orderByChild(tsField),
+        startAt(start),
+        endAt(end),
+      )
+
+      unsubData = onValue(
+        dayQuery,
         (snapshot) => {
           setError(null)
           setLoading(false)
@@ -412,64 +562,50 @@ function App() {
             })
           })
           setRows(next)
+          pushDayStatsToFirebase(selectedDay, next)
         },
         (err) => {
           setLoading(false)
-          setError(err.message)
+          const msg = err.message
+          setError(
+            msg.includes('index') || msg.includes('Index')
+              ? `${msg} — voeg in Firebase Realtime Database rules bij events toe: ".indexOn": ["${tsField}"]`
+              : msg,
+          )
         },
       )
 
       return () => {
         unsubConnected?.()
-        unsubData()
+        unsubData?.()
       }
     } catch (e) {
       setLoading(false)
       setError(e instanceof Error ? e.message : String(e))
       return () => {
         unsubConnected?.()
+        unsubData?.()
       }
     }
-  }, [path, tsField])
+  }, [path, tsField, selectedDay, pushDayStatsToFirebase])
 
-  const todayKey = toDayKey(now)
-
-  const [selectedDay, setSelectedDay] = useState<string>(todayKey)
-
-  const { rowsWithTimestamp, rowsWithoutTimestamp, availableDays } = useMemo(() => {
+  const { rowsWithTimestamp, rowsWithoutTimestamp } = useMemo(() => {
     const rowsWithTimestamp: Row[] = []
     const rowsWithoutTimestamp: Row[] = []
-    const daySet = new Set<string>()
     for (const r of rows) {
       if (r.timestampMs == null) {
         rowsWithoutTimestamp.push(r)
         continue
       }
       rowsWithTimestamp.push(r)
-      daySet.add(toDayKey(r.timestampMs))
     }
     rowsWithTimestamp.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0))
     rowsWithoutTimestamp.sort((a, b) => a.key.localeCompare(b.key))
-    const availableDays = [...daySet].sort((a, b) => b.localeCompare(a))
-    return { rowsWithTimestamp, rowsWithoutTimestamp, availableDays }
+    return { rowsWithTimestamp, rowsWithoutTimestamp }
   }, [rows])
 
-  useEffect(() => {
-    if (selectedDay === todayKey) return
-    if (!availableDays.includes(selectedDay)) {
-      setSelectedDay(todayKey)
-    }
-  }, [availableDays, selectedDay, todayKey])
-
-  const rowsInSelectedDay = useMemo(() => {
-    return rowsWithTimestamp.filter((r) => {
-      if (r.timestampMs == null) return false
-      return toDayKey(r.timestampMs) === selectedDay
-    })
-  }, [rowsWithTimestamp, selectedDay])
-
-  const sortedRowsInSelectedDay = useMemo(() => {
-    const next = [...rowsInSelectedDay]
+  const sortedRows = useMemo(() => {
+    const next = [...rowsWithTimestamp]
     if (sortBy === 'speed') {
       next.sort((a, b) => {
         const sa = readSpeedKmh(a.value) ?? Number.NEGATIVE_INFINITY
@@ -481,45 +617,15 @@ function App() {
     }
     next.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0))
     return next
-  }, [rowsInSelectedDay, sortBy])
+  }, [rowsWithTimestamp, sortBy])
 
-  const otherDays = useMemo(
-    () => availableDays.filter((d) => d !== todayKey),
-    [availableDays, todayKey],
+  const dayStatsLive = useMemo(
+    () => computeDayStatsFromRows(rowsWithTimestamp),
+    [rowsWithTimestamp],
   )
 
-  const speedRecordSelectedDay = useMemo(() => {
-    let max: number | null = null
-    for (const r of rowsWithTimestamp) {
-      if (r.timestampMs == null || toDayKey(r.timestampMs) !== selectedDay) {
-        continue
-      }
-      const speed = readSpeedKmh(r.value)
-      if (speed == null) continue
-      if (max == null || speed > max) max = speed
-    }
-    return max
-  }, [rowsWithTimestamp, selectedDay])
-
-  const speedRecordAllTime = useMemo(() => {
-    let max: number | null = null
-    for (const r of rowsWithTimestamp) {
-      const speed = readSpeedKmh(r.value)
-      if (speed == null) continue
-      if (max == null || speed > max) max = speed
-    }
-    return max
-  }, [rowsWithTimestamp])
-
-  const totalFineSelectedDay = useMemo(
-    () => sumFineEur(rowsWithTimestamp, { dayKey: selectedDay }),
-    [rowsWithTimestamp, selectedDay],
-  )
-
-  const totalFineThisMonth = useMemo(
-    () => sumFineEur(rowsWithTimestamp, { monthKey: toMonthKey(now) }),
-    [rowsWithTimestamp, now],
-  )
+  const speedRecordSelectedDay = dayStatsLive.maxSpeed
+  const totalFineSelectedDay = dayStatsLive.totalFineEur
 
   return (
     <div className="app">
@@ -565,23 +671,21 @@ function App() {
 
       {!loading && !error && rows.length === 0 && (
         <div className="banner info" role="status">
-          Er komen geen events binnen op RTDB-pad <code>{path}</code>. Lokaal
-          staat dat in <code>VITE_RTDB_PATH</code>; op Vercel moet dezelfde
-          waarde in de build staan (variabele zetten en opnieuw deployen).
+          Geen metingen op{' '}
+          {selectedDay === todayKey
+            ? `vandaag (${formatDate(now)})`
+            : formatDayLabel(selectedDay)}
+          . Kies een andere dag of controleer het RTDB-pad <code>{path}</code>.
         </div>
       )}
 
       {!loading &&
         !error &&
         rows.length > 0 &&
-        sortedRowsInSelectedDay.length === 0 && (
+        sortedRows.length === 0 && (
           <div className="banner info" role="status">
-            Er zijn {rows.length} event(s) geladen, maar geen op{' '}
-            {selectedDay === todayKey
-              ? `vandaag (${formatDate(now)})`
-              : formatDayLabel(selectedDay)}{' '}
-            met een bruikbare tijd. Probeer <strong>Andere dag</strong>, of
-            kijk hieronder bij <strong>Zonder bruikbare tijdstempel</strong>.
+            Er zijn {rows.length} event(s) voor deze dag, maar zonder bruikbare
+            tijd. Zie <strong>Zonder bruikbare tijdstempel</strong> hieronder.
           </div>
         )}
 
@@ -593,14 +697,14 @@ function App() {
             {selectedDay === todayKey ? (
               <>
                 Vandaag ({formatDate(now)}) ·{' '}
-                <span className="count">{sortedRowsInSelectedDay.length}</span>{' '}
-                metingen boven 35 km/u
+                <span className="count">{sortedRows.length}</span> metingen boven
+                35 km/u
               </>
             ) : (
               <>
                 {formatDayLabel(selectedDay)} ·{' '}
-                <span className="count">{sortedRowsInSelectedDay.length}</span>{' '}
-                metingen boven 35 km/u
+                <span className="count">{sortedRows.length}</span> metingen boven
+                35 km/u
               </>
             )}
           </h2>
@@ -616,8 +720,8 @@ function App() {
             <div className="stat-card">
               <span className="stat-label">Record aller tijden</span>
               <span className="stat-value">
-                {speedRecordAllTime != null
-                  ? `${speedRecordAllTime.toLocaleString('nl-NL')} km/u`
+                {recordAllTimeKmh != null
+                  ? `${recordAllTimeKmh.toLocaleString('nl-NL')} km/u`
                   : '—'}
               </span>
             </div>
@@ -630,7 +734,7 @@ function App() {
             <div className="stat-card stat-card--fine">
               <span className="stat-label">Boetebedrag deze maand</span>
               <span className="stat-value">
-                {formatFineEur(totalFineThisMonth)}
+                {formatFineEur(monthFineTotalEur)}
               </span>
             </div>
           </div>
@@ -639,7 +743,7 @@ function App() {
             <select
               id="day-select"
               value={selectedDay}
-              onChange={(e) => setSelectedDay(e.target.value)}
+              onChange={(e) => selectDay(e.target.value)}
             >
               <option value={todayKey}>Vandaag ({formatDate(now)})</option>
               {otherDays.map((day) => (
@@ -662,7 +766,7 @@ function App() {
 
         {!loading && (
           <PeaksTable
-            rows={sortedRowsInSelectedDay}
+            rows={sortedRows}
             emptyHint={`Geen pieken met bekende tijd op ${
               selectedDay === todayKey
                 ? `vandaag (${formatDate(now)})`

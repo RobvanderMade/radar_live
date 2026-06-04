@@ -286,6 +286,10 @@
   font-size: 1.15rem;
 }
 
+.panel-hint {
+  margin: 0 0 0.5rem;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

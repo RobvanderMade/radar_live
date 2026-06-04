@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID: string
   readonly VITE_FIREBASE_APP_ID: string
   readonly VITE_RTDB_PATH?: string
+  readonly VITE_RTDB_STATS_PATH?: string
   readonly VITE_RTDB_TS_FIELD?: string
   readonly VITE_WINDOW_TICK_MS?: string
 }
