@@ -262,6 +262,63 @@ function formatDayLabel(dayKey: string): string {
   }).format(dt)
 }
 
+const INFO_PARAGRAPHS = [
+  'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Nieuwe passages vanaf een gemeten snelheid van 35 km/u verschijnen live.',
+  'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid en kies via “Andere dag” een andere kalenderdag.',
+  'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag. Het record aller tijden is het maximum over alle geladen metingen.',
+  'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
+  '“Boetebedrag van de dag” en “Boetebedrag deze maand” tellen de indicatieve bedragen op voor de geselecteerde dag respectievelijk de lopende kalendermaand.',
+  'De status “Verbonden” betekent dat de app live verbonden is met de radar en nieuwe events ontvangt. Bij “Niet verbonden” worden geen nieuwe events ontvangen.',
+  'De metingen en resultaten zijn slechts indicatief en zonder verdere gevolgen of juridische onderbouwing.',
+]
+
+function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return (
+    <div className="info-backdrop" onClick={onClose}>
+      <div
+        className="info-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="info-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="info-dialog-head">
+          <h2 id="info-dialog-title">Informatie</h2>
+          <button
+            type="button"
+            className="info-close"
+            onClick={onClose}
+            aria-label="Sluiten"
+          >
+            ×
+          </button>
+        </div>
+        <div className="info-dialog-body">
+          {INFO_PARAGRAPHS.map((text) => (
+            <p key={text}>{text}</p>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PeaksTable({
   rows,
   emptyHint,
@@ -322,6 +379,7 @@ function App() {
   const [connected, setConnected] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
+  const [infoOpen, setInfoOpen] = useState(false)
 
   useEffect(() => {
     const tickMs = Math.min(1000, WINDOW_TICK_MS)
@@ -453,9 +511,9 @@ function App() {
     return max
   }, [rowsWithTimestamp])
 
-  const totalFineToday = useMemo(
-    () => sumFineEur(rowsWithTimestamp, { dayKey: todayKey }),
-    [rowsWithTimestamp, todayKey],
+  const totalFineSelectedDay = useMemo(
+    () => sumFineEur(rowsWithTimestamp, { dayKey: selectedDay }),
+    [rowsWithTimestamp, selectedDay],
   )
 
   const totalFineThisMonth = useMemo(
@@ -479,6 +537,15 @@ function App() {
           </div>
         </div>
         <div className="header-meta">
+          <button
+            type="button"
+            className="info-btn"
+            onClick={() => setInfoOpen(true)}
+            aria-label="Informatie openen"
+            title="Informatie"
+          >
+            info
+          </button>
           <time className="header-clock" dateTime={new Date(now).toISOString()}>
             {formatClock(now)}
           </time>
@@ -487,6 +554,8 @@ function App() {
           </div>
         </div>
       </header>
+
+      <InfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} />
 
       {error && (
         <div className="banner error" role="alert">
@@ -553,8 +622,10 @@ function App() {
               </span>
             </div>
             <div className="stat-card stat-card--fine">
-              <span className="stat-label">Boetebedrag vandaag</span>
-              <span className="stat-value">{formatFineEur(totalFineToday)}</span>
+              <span className="stat-label">Boetebedrag van de dag</span>
+              <span className="stat-value">
+                {formatFineEur(totalFineSelectedDay)}
+              </span>
             </div>
             <div className="stat-card stat-card--fine">
               <span className="stat-label">Boetebedrag deze maand</span>
