@@ -333,10 +333,10 @@ function formatDayLabel(dayKey: string): string {
 const INFO_PARAGRAPHS = [
   'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Nieuwe passages vanaf een gemeten snelheid van 35 km/u verschijnen live.',
   'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid en kies via “Andere dag” een andere kalenderdag.',
-  'Het record van de dag en het boetebedrag van de dag gelden voor de gekozen kalenderdag. Na elke update worden dagtotalen in Firebase opgeslagen.',
-  'Het record aller tijden staat in Firebase en wordt alleen vervangen als er een hogere snelheid wordt gemeten. Het boetebedrag deze maand is de som van opgeslagen dagbedragen in Firebase voor de lopende maand.',
+  'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag. Het record aller tijden is het maximum over alle geladen metingen.',
+  'Om fouten te voorkomen wordt er slechts één voertuig per 5 seconden gemeten. Hierdoor kan er een passage gemist worden',
   'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
-  'Per dag worden alleen de metingen van die dag opgehaald (sneller laden). Kies een dag via “Andere dag” (laatste 90 dagen).',
+  '“Boetebedrag van de dag” en “Boetebedrag deze maand” tellen de indicatieve bedragen op voor de geselecteerde dag respectievelijk de lopende kalendermaand.',
   'De status “Verbonden” betekent dat de app live verbonden is met de radar en nieuwe events ontvangt. Bij “Niet verbonden” worden geen nieuwe events ontvangen.',
   'De metingen en resultaten zijn slechts indicatief, niet bedoeld voor handhaving en zonder verdere gevolgen of juridische onderbouwing.',
 ]
