@@ -123,6 +123,94 @@ function readDirection(val: RawRow): string | null {
   return null
 }
 
+/** Maximumsnelheid ter plaatse (km/h) */
+const SPEED_LIMIT_KMH = 30
+
+/** Correctie op meting vóór overschrijding (km/h) */
+const SPEED_MEASUREMENT_CORRECTION_KMH = 3
+
+/** Tot en met deze gemeten snelheid: geen boete */
+const FINE_FREE_UP_TO_KMH = 36
+
+const FINE_EUR_BY_OVERSPEED: Record<number, number> = {
+  4: 62,
+  5: 73,
+  6: 85,
+  7: 98,
+  8: 113,
+  9: 126,
+  10: 142,
+  11: 179,
+  12: 194,
+  13: 210,
+  14: 229,
+  15: 246,
+  16: 263,
+  17: 282,
+  18: 301,
+  19: 321,
+  20: 342,
+  21: 363,
+  22: 388,
+  23: 410,
+  24: 434,
+  25: 456,
+  26: 481,
+  27: 505,
+  28: 524,
+  29: 524,
+  30: 545,
+}
+
+const FINE_EUR_BY_OVERSPEED_RANGE: { min: number; max: number; amount: number }[] =
+  [
+    { min: 31, max: 35, amount: 580 },
+    { min: 36, max: 40, amount: 720 },
+    { min: 41, max: 45, amount: 840 },
+    { min: 46, max: 50, amount: 1000 },
+    { min: 51, max: 55, amount: 1150 },
+    { min: 56, max: 60, amount: 1350 },
+    { min: 61, max: 65, amount: 1550 },
+    { min: 66, max: 70, amount: 1700 },
+    { min: 71, max: 75, amount: 1950 },
+    { min: 76, max: 80, amount: 2150 },
+    { min: 81, max: 85, amount: 2400 },
+    { min: 86, max: 90, amount: 2600 },
+    { min: 91, max: 95, amount: 2900 },
+    { min: 96, max: 100, amount: 3350 },
+  ]
+
+function overspeedKmh(speedKmh: number): number {
+  return (
+    Math.round(speedKmh) -
+    SPEED_LIMIT_KMH -
+    SPEED_MEASUREMENT_CORRECTION_KMH
+  )
+}
+
+function fineEurForOverspeed(overspeed: number): number {
+  if (overspeed < 4) return 0
+  const exact = FINE_EUR_BY_OVERSPEED[overspeed]
+  if (exact != null) return exact
+  for (const band of FINE_EUR_BY_OVERSPEED_RANGE) {
+    if (overspeed >= band.min && overspeed <= band.max) return band.amount
+  }
+  if (overspeed > 100) {
+    return FINE_EUR_BY_OVERSPEED_RANGE.at(-1)?.amount ?? 3350
+  }
+  return 0
+}
+
+function fineEurForSpeedKmh(speedKmh: number): number {
+  const speed = Math.round(speedKmh)
+  if (speed <= FINE_FREE_UP_TO_KMH) return 0
+  return fineEurForOverspeed(overspeedKmh(speed))
+}
+
+function formatFineEur(amount: number): string {
+  return `€ ${amount.toLocaleString('nl-NL')}`
+}
+
 const dateFmtNl = new Intl.DateTimeFormat('nl-NL', { dateStyle: 'short' })
 const timeFmtNl = new Intl.DateTimeFormat('nl-NL', { timeStyle: 'medium' })
 
@@ -140,6 +228,28 @@ function toDayKey(ms: number): string {
   const m = String(dt.getMonth() + 1).padStart(2, '0')
   const d = String(dt.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+function toMonthKey(ms: number): string {
+  const dt = new Date(ms)
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}`
+}
+
+function sumFineEur(rows: Row[], match?: { dayKey?: string; monthKey?: string }): number {
+  let sum = 0
+  for (const r of rows) {
+    if (r.timestampMs == null) continue
+    if (match?.dayKey != null && toDayKey(r.timestampMs) !== match.dayKey) continue
+    if (match?.monthKey != null && toMonthKey(r.timestampMs) !== match.monthKey) {
+      continue
+    }
+    const speed = readSpeedKmh(r.value)
+    if (speed == null) continue
+    sum += fineEurForSpeedKmh(speed)
+  }
+  return sum
 }
 
 function formatDayLabel(dayKey: string): string {
@@ -171,6 +281,7 @@ function PeaksTable({
             <th>Tijd</th>
             <th className="num">Snelheid</th>
             <th>Richting</th>
+            <th className="num">Boetebedrag</th>
           </tr>
         </thead>
         <tbody>
@@ -178,6 +289,7 @@ function PeaksTable({
             const ms = r.timestampMs
             const speed = readSpeedKmh(r.value)
             const direction = readDirection(r.value)
+            const fineEur = speed != null ? fineEurForSpeedKmh(speed) : null
             return (
               <tr key={r.key}>
                 <td>{ms != null ? formatDate(ms) : '—'}</td>
@@ -188,6 +300,9 @@ function PeaksTable({
                     : '—'}
                 </td>
                 <td>{direction ?? '—'}</td>
+                <td className="num">
+                  {fineEur != null ? formatFineEur(fineEur) : '—'}
+                </td>
               </tr>
             )
           })}
@@ -315,16 +430,18 @@ function App() {
     [availableDays, todayKey],
   )
 
-  const speedRecordToday = useMemo(() => {
+  const speedRecordSelectedDay = useMemo(() => {
     let max: number | null = null
     for (const r of rowsWithTimestamp) {
-      if (r.timestampMs == null || toDayKey(r.timestampMs) !== todayKey) continue
+      if (r.timestampMs == null || toDayKey(r.timestampMs) !== selectedDay) {
+        continue
+      }
       const speed = readSpeedKmh(r.value)
       if (speed == null) continue
       if (max == null || speed > max) max = speed
     }
     return max
-  }, [rowsWithTimestamp, todayKey])
+  }, [rowsWithTimestamp, selectedDay])
 
   const speedRecordAllTime = useMemo(() => {
     let max: number | null = null
@@ -335,6 +452,16 @@ function App() {
     }
     return max
   }, [rowsWithTimestamp])
+
+  const totalFineToday = useMemo(
+    () => sumFineEur(rowsWithTimestamp, { dayKey: todayKey }),
+    [rowsWithTimestamp, todayKey],
+  )
+
+  const totalFineThisMonth = useMemo(
+    () => sumFineEur(rowsWithTimestamp, { monthKey: toMonthKey(now) }),
+    [rowsWithTimestamp, now],
+  )
 
   return (
     <div className="app">
@@ -408,23 +535,33 @@ function App() {
               </>
             )}
           </h2>
-          <div className="records">
-            <p className="record-pill">
-              Snelheidsrecord vandaag:{' '}
-              <strong>
-                {speedRecordToday != null
-                  ? `${speedRecordToday.toLocaleString('nl-NL')} km/u`
+          <div className="stats-grid" role="group" aria-label="Statistieken">
+            <div className="stat-card">
+              <span className="stat-label">Record van de dag</span>
+              <span className="stat-value">
+                {speedRecordSelectedDay != null
+                  ? `${speedRecordSelectedDay.toLocaleString('nl-NL')} km/u`
                   : '—'}
-              </strong>
-            </p>
-            <p className="record-pill">
-              Snelheidsrecord aller tijden:{' '}
-              <strong>
+              </span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Record aller tijden</span>
+              <span className="stat-value">
                 {speedRecordAllTime != null
                   ? `${speedRecordAllTime.toLocaleString('nl-NL')} km/u`
                   : '—'}
-              </strong>
-            </p>
+              </span>
+            </div>
+            <div className="stat-card stat-card--fine">
+              <span className="stat-label">Boetebedrag vandaag</span>
+              <span className="stat-value">{formatFineEur(totalFineToday)}</span>
+            </div>
+            <div className="stat-card stat-card--fine">
+              <span className="stat-label">Boetebedrag deze maand</span>
+              <span className="stat-value">
+                {formatFineEur(totalFineThisMonth)}
+              </span>
+            </div>
           </div>
           <div className="day-filter">
             <label htmlFor="day-select">Andere dag</label>

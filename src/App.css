@@ -183,28 +183,70 @@
 }
 
 .panel-head h2 {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.5rem;
   font-size: 1.15rem;
 }
 
-.records {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.25rem 0 0.25rem;
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0 0 0.65rem;
 }
 
-.record-pill {
-  margin: 0;
-  padding: 0.38rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg) 88%, var(--border));
-  font-size: 0.86rem;
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.6rem;
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.stat-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text) 88%, transparent);
+}
+
+.stat-value {
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-h);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.stat-card--fine .stat-value {
+  color: var(--accent);
+}
+
+@media (min-width: 640px) {
+  .stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .stat-card {
+    padding: 0.55rem 0.65rem;
+  }
+
+  .stat-value {
+    font-size: 1.02rem;
+  }
 }
 
 .day-filter {
-  margin: 0.35rem 0 0.45rem;
+  margin: 0 0 0.45rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -425,14 +467,16 @@
     padding: 0.75rem;
   }
 
-  .records {
-    flex-direction: column;
-    gap: 0.4rem;
+  .stats-grid {
+    gap: 0.35rem;
   }
 
-  .record-pill {
-    border-radius: 10px;
-    padding: 0.42rem 0.55rem;
+  .stat-card {
+    padding: 0.45rem 0.5rem;
+  }
+
+  .stat-value {
+    font-size: 0.92rem;
   }
 
   .day-filter {
