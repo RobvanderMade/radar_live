@@ -269,7 +269,7 @@ const INFO_PARAGRAPHS = [
   'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
   '“Boetebedrag van de dag” en “Boetebedrag deze maand” tellen de indicatieve bedragen op voor de geselecteerde dag respectievelijk de lopende kalendermaand.',
   'De status “Verbonden” betekent dat de app live verbonden is met de radar en nieuwe events ontvangt. Bij “Niet verbonden” worden geen nieuwe events ontvangen.',
-  'De metingen en resultaten zijn slechts indicatief en zonder verdere gevolgen of juridische onderbouwing.',
+  'De metingen en resultaten zijn slechts indicatief, niet bedoeld voor handhaving en zonder verdere gevolgen of juridische onderbouwing.',
 ]
 
 function InfoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
