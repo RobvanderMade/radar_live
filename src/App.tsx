@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   endAt,
+  get,
   onValue,
   orderByChild,
   query,
   ref,
-  runTransaction,
+  remove,
   set,
   startAt,
   type Database,
@@ -16,6 +17,9 @@ import './App.css'
 const WINDOW_TICK_MS = Number(
   import.meta.env.VITE_WINDOW_TICK_MS ?? 3000,
 )
+
+/** Metingen boven deze snelheid worden niet geregistreerd en uit RTDB verwijderd */
+const MAX_SPEED_KMH = 80
 
 type RawRow = Record<string, unknown>
 
@@ -61,16 +65,6 @@ async function persistDayStatsToFirebase(
     maxSpeedKmh: stats.maxSpeed,
     updatedAt: new Date().toISOString(),
   })
-
-  if (stats.maxSpeed != null) {
-    const recordRef = ref(db, `${statsBase}/recordAllTimeKmh`)
-    await runTransaction(recordRef, (current) => {
-      const cur =
-        typeof current === 'number' && Number.isFinite(current) ? current : null
-      if (cur == null || stats.maxSpeed! > cur) return stats.maxSpeed
-      return cur
-    })
-  }
 }
 
 const SELECTABLE_DAY_COUNT = 90
@@ -187,7 +181,7 @@ function extractTimestampMs(val: RawRow, tsField: string): number | null {
   return alt
 }
 
-function readSpeedKmh(val: RawRow): number | null {
+function readRawSpeedKmh(val: RawRow): number | null {
   const v = val.speed_kmh ?? val.snelheid_kmh ?? val.peak_speed_kmh
   if (typeof v === 'number' && Number.isFinite(v)) return v
   if (typeof v === 'string') {
@@ -195,6 +189,61 @@ function readSpeedKmh(val: RawRow): number | null {
     return Number.isFinite(n) ? n : null
   }
   return null
+}
+
+function isOverSpeedLimit(speed: number): boolean {
+  return speed > MAX_SPEED_KMH
+}
+
+function readSpeedKmh(val: RawRow): number | null {
+  const speed = readRawSpeedKmh(val)
+  if (speed == null || isOverSpeedLimit(speed)) return null
+  return speed
+}
+
+async function purgeOverLimitEvents(
+  db: Database,
+  eventsPath: string,
+): Promise<number> {
+  const snap = await get(ref(db, eventsPath))
+  if (!snap.exists()) return 0
+  const tasks: Promise<void>[] = []
+  let count = 0
+  snap.forEach((child) => {
+    const key = child.key
+    if (key == null) return
+    const speed = readRawSpeedKmh((child.val() ?? {}) as RawRow)
+    if (speed == null || !isOverSpeedLimit(speed)) return
+    count++
+    tasks.push(remove(ref(db, `${eventsPath}/${key}`)))
+  })
+  await Promise.all(tasks)
+  return count
+}
+
+async function sanitizeStatsOverLimit(
+  db: Database,
+  statsBase: string,
+): Promise<void> {
+  await remove(ref(db, `${statsBase}/recordAllTimeKmh`)).catch(() => {})
+
+  const daysSnap = await get(ref(db, `${statsBase}/days`))
+  const fixes: Promise<void>[] = []
+  daysSnap.forEach((child) => {
+    const dayKey = child.key
+    if (dayKey == null) return
+    const val = (child.val() ?? {}) as Record<string, unknown>
+    const ms = Number(val.maxSpeedKmh)
+    if (!Number.isFinite(ms) || !isOverSpeedLimit(ms)) return
+    fixes.push(
+      set(ref(db, `${statsBase}/days/${dayKey}`), {
+        ...val,
+        maxSpeedKmh: null,
+        updatedAt: new Date().toISOString(),
+      }),
+    )
+  })
+  await Promise.all(fixes)
 }
 
 function readDirection(val: RawRow): string | null {
@@ -333,7 +382,7 @@ function formatDayLabel(dayKey: string): string {
 const INFO_PARAGRAPHS = [
   'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Nieuwe passages vanaf een gemeten snelheid van 35 km/u verschijnen live.',
   'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid en kies via “Andere dag” een andere kalenderdag.',
-  'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag. Het record aller tijden is het maximum over alle geladen metingen.',
+  'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag.',
   'Om fouten te voorkomen wordt er slechts één voertuig per 5 seconden gemeten. Hierdoor kan er een passage gemist worden',
   'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
   '“Boetebedrag van de dag” en “Boetebedrag deze maand” tellen de indicatieve bedragen op voor de geselecteerde dag respectievelijk de lopende kalendermaand.',
@@ -450,8 +499,8 @@ function App() {
   const [now, setNow] = useState(() => Date.now())
   const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
   const [infoOpen, setInfoOpen] = useState(false)
-  const [recordAllTimeKmh, setRecordAllTimeKmh] = useState<number | null>(null)
   const [monthFineTotalEur, setMonthFineTotalEur] = useState(0)
+  const purgeStartedRef = useRef(false)
 
   const todayKey = toDayKey(now)
   const [selectedDay, setSelectedDay] = useState<string>(todayKey)
@@ -498,18 +547,17 @@ function App() {
   }, [selectableDays, selectedDay, todayKey])
 
   useEffect(() => {
+    if (purgeStartedRef.current) return
+    purgeStartedRef.current = true
+    const db = getRtdb()
+    void purgeOverLimitEvents(db, path)
+      .then(() => sanitizeStatsOverLimit(db, statsBase))
+      .catch((e) => console.error('Opschonen snelheden > 80 km/u mislukt:', e))
+  }, [path, statsBase])
+
+  useEffect(() => {
     const db = getRtdb()
     const monthKey = toMonthKey(now)
-
-    const unsubRecord = onValue(
-      ref(db, `${statsBase}/recordAllTimeKmh`),
-      (snap) => {
-        const v = snap.val()
-        setRecordAllTimeKmh(
-          typeof v === 'number' && Number.isFinite(v) ? v : null,
-        )
-      },
-    )
 
     const unsubDays = onValue(ref(db, `${statsBase}/days`), (snap) => {
       let sum = 0
@@ -522,7 +570,6 @@ function App() {
     })
 
     return () => {
-      unsubRecord()
       unsubDays()
     }
   }, [statsBase, now])
@@ -553,14 +600,27 @@ function App() {
           setError(null)
           setLoading(false)
           const next: Row[] = []
+          const removals: Promise<void>[] = []
           snapshot.forEach((child) => {
+            const key = child.key
+            if (key == null) return
             const value = (child.val() ?? {}) as RawRow
+            const rawSpeed = readRawSpeedKmh(value)
+            if (rawSpeed != null && isOverSpeedLimit(rawSpeed)) {
+              removals.push(remove(ref(db, `${path}/${key}`)))
+              return
+            }
             next.push({
-              key: child.key ?? '?',
+              key,
               timestampMs: extractTimestampMs(value, tsField),
               value,
             })
           })
+          if (removals.length > 0) {
+            void Promise.all(removals).catch((e) =>
+              console.error('Verwijderen metingen > 80 km/u mislukt:', e),
+            )
+          }
           setRows(next)
           pushDayStatsToFirebase(selectedDay, next)
         },
@@ -714,14 +774,6 @@ function App() {
               <span className="stat-value">
                 {speedRecordSelectedDay != null
                   ? `${speedRecordSelectedDay.toLocaleString('nl-NL')} km/u`
-                  : '—'}
-              </span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Record aller tijden</span>
-              <span className="stat-value">
-                {recordAllTimeKmh != null
-                  ? `${recordAllTimeKmh.toLocaleString('nl-NL')} km/u`
                   : '—'}
               </span>
             </div>
