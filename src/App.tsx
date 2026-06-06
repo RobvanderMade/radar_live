@@ -380,7 +380,7 @@ function formatDayLabel(dayKey: string): string {
 }
 
 const INFO_PARAGRAPHS = [
-  'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Nieuwe passages vanaf een gemeten snelheid van 35 km/u verschijnen live.',
+  'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Metingen met een snelheid tussen 35 en 80 km/u verschijnen live. Hogere metingen zijn helaas onbetrouwbaar en worden niet getoond',
   'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid en kies via “Andere dag” een andere kalenderdag.',
   'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag.',
   'Om fouten te voorkomen wordt er slechts één voertuig per 5 seconden gemeten. Hierdoor kan er een passage gemist worden',
