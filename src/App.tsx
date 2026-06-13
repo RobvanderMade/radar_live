@@ -247,7 +247,8 @@ function isOverSpeedLimit(speed: number): boolean {
 function readSpeedKmh(val: RawRow): number | null {
   const speed = readRawSpeedKmh(val)
   if (speed == null || isOverSpeedLimit(speed)) return null
-  return speed
+  const corrected = speed - SPEED_MEASUREMENT_CORRECTION_KMH
+  return corrected > 0 ? corrected : null
 }
 
 async function purgeOverLimitEvents(
@@ -307,11 +308,11 @@ function readDirection(val: RawRow): string | null {
 /** Maximumsnelheid ter plaatse (km/h) */
 const SPEED_LIMIT_KMH = 30
 
-/** Correctie op meting vóór overschrijding (km/h) */
+/** Correctie op meting (km/h); getoond en gebruikt in statistieken/boetes */
 const SPEED_MEASUREMENT_CORRECTION_KMH = 3
 
-/** Tot en met deze gemeten snelheid: geen boete */
-const FINE_FREE_UP_TO_KMH = 36
+/** Tot en met deze gecorrigeerde snelheid: geen boete (raw 36 km/u) */
+const FINE_FREE_UP_TO_KMH = 33
 
 const FINE_EUR_BY_OVERSPEED: Record<number, number> = {
   4: 62,
@@ -361,12 +362,8 @@ const FINE_EUR_BY_OVERSPEED_RANGE: { min: number; max: number; amount: number }[
     { min: 96, max: 100, amount: 3350 },
   ]
 
-function overspeedKmh(speedKmh: number): number {
-  return (
-    Math.round(speedKmh) -
-    SPEED_LIMIT_KMH -
-    SPEED_MEASUREMENT_CORRECTION_KMH
-  )
+function overspeedKmh(correctedSpeedKmh: number): number {
+  return Math.round(correctedSpeedKmh) - SPEED_LIMIT_KMH
 }
 
 function fineEurForOverspeed(overspeed: number): number {
@@ -483,7 +480,7 @@ const INFO_PARAGRAPHS = [
   'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid, kies een datum en filter optioneel op uren (24-uurs, per heel uur).',
   'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag.',
   'Om fouten te voorkomen wordt er slechts één voertuig per 5 seconden gemeten. Hierdoor kan er een passage gemist worden',
-  'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
+  'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Snelheden worden met 3 km/u gecorrigeerd; boetes gelden vanaf 34 km/u (gecorrigeerd).',
   '“Boetebedrag van de dag” en “Boetebedrag deze maand” tellen de indicatieve bedragen op voor de geselecteerde dag respectievelijk de lopende kalendermaand.',
   'De status “Verbonden” betekent dat de app live verbonden is met de radar en nieuwe events ontvangt. Bij “Niet verbonden” worden geen nieuwe events ontvangen.',
   'De metingen en resultaten zijn slechts indicatief, niet bedoeld voor handhaving en zonder verdere gevolgen of juridische onderbouwing.',
