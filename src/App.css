@@ -331,6 +331,12 @@
   color: var(--accent);
 }
 
+.stat-sub {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--text) 75%, transparent);
+}
+
 @media (min-width: 640px) {
   .stats-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -343,6 +349,12 @@
 
   .stat-value {
     font-size: 1.02rem;
+  }
+}
+
+@media (min-width: 900px) {
+  .stats-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
@@ -361,13 +373,52 @@
   color: var(--text);
 }
 
-.day-filter select {
+.day-filter select,
+.day-filter input[type='time'] {
   min-width: 220px;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.35rem 0.5rem;
   background: var(--bg);
   color: var(--text-h);
+}
+
+.day-filter input[type='time'] {
+  min-width: 7.5rem;
+}
+
+.filter-clear {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  background: color-mix(in srgb, var(--bg) 92%, var(--text));
+  color: var(--text);
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.filter-clear:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text-h);
+}
+
+.filter-field--inline {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 1 1 100%;
+  min-width: min(100%, 20rem);
+}
+
+.filter-field--inline label {
+  width: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.filter-field--inline select {
+  flex: 1 1 auto;
+  min-width: 12rem;
 }
 
 .panel h3 {
@@ -590,9 +641,24 @@
     width: 100%;
   }
 
-  .day-filter select {
+  .filter-field--inline label {
+    width: auto;
+  }
+
+  .day-filter select,
+  .day-filter input[type='time'] {
     width: 100%;
     min-width: 0;
+  }
+
+  .filter-field--inline select {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .filter-clear {
+    width: 100%;
   }
 
   .table-wrap {

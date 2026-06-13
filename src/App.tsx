@@ -101,6 +101,55 @@ function computeDayStatsFromRows(rows: Row[]): DayStats {
   return { maxSpeed, totalFineEur }
 }
 
+type DirectionAverages = {
+  monster: number | null
+  naaldwijk: number | null
+  monsterCount: number
+  naaldwijkCount: number
+}
+
+function directionIsToward(
+  direction: string | null,
+  place: 'monster' | 'naaldwijk',
+): boolean {
+  if (direction == null) return false
+  return direction.toLowerCase().includes(place)
+}
+
+function computeDirectionAverages(rows: Row[]): DirectionAverages {
+  let monsterSum = 0
+  let monsterCount = 0
+  let naaldwijkSum = 0
+  let naaldwijkCount = 0
+  for (const r of rows) {
+    const speed = readSpeedKmh(r.value)
+    if (speed == null) continue
+    const direction = readDirection(r.value)
+    if (directionIsToward(direction, 'monster')) {
+      monsterSum += speed
+      monsterCount++
+    }
+    if (directionIsToward(direction, 'naaldwijk')) {
+      naaldwijkSum += speed
+      naaldwijkCount++
+    }
+  }
+  return {
+    monster: monsterCount > 0 ? monsterSum / monsterCount : null,
+    naaldwijk: naaldwijkCount > 0 ? naaldwijkSum / naaldwijkCount : null,
+    monsterCount,
+    naaldwijkCount,
+  }
+}
+
+function formatAvgSpeedKmh(avg: number | null): string {
+  if (avg == null) return '—'
+  return `${avg.toLocaleString('nl-NL', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} km/u`
+}
+
 function toMillis(ts: unknown): number | null {
   if (typeof ts !== 'number' || !Number.isFinite(ts)) return null
   if (ts > 1e12) return ts
@@ -379,9 +428,53 @@ function formatDayLabel(dayKey: string): string {
   }).format(dt)
 }
 
+function parseTimeOnDay(dayKey: string, timeStr: string): number | null {
+  const trimmed = timeStr.trim()
+  if (!trimmed) return null
+  const m = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed)
+  if (!m) return null
+  const [, h, mi, sec] = m
+  const dt = new Date(`${dayKey}T00:00:00`)
+  dt.setHours(Number(h), Number(mi), sec != null ? Number(sec) : 0, 0)
+  return Number.isFinite(dt.getTime()) ? dt.getTime() : null
+}
+
+/** Eindtijd inclusief hele minuut (input type="time" levert HH:MM) */
+function parseEndTimeOnDay(dayKey: string, timeStr: string): number | null {
+  const startMs = parseTimeOnDay(dayKey, timeStr)
+  if (startMs == null) return null
+  if (/^\d{2}:\d{2}$/.test(timeStr.trim())) {
+    return startMs + 60_000 - 1
+  }
+  return startMs
+}
+
+function rowMatchesTimeFilter(
+  row: Row,
+  dayKey: string,
+  startTime: string,
+  endTime: string,
+): boolean {
+  const ms = row.timestampMs
+  if (ms == null) return false
+  const startMs = parseTimeOnDay(dayKey, startTime)
+  const endMs = parseEndTimeOnDay(dayKey, endTime)
+  if (startMs != null && endMs != null && startMs > endMs) return false
+  if (startMs != null && ms < startMs) return false
+  if (endMs != null && ms > endMs) return false
+  return true
+}
+
+function formatTimeFilterLabel(startTime: string, endTime: string): string | null {
+  if (!startTime && !endTime) return null
+  if (startTime && endTime) return `${startTime}–${endTime}`
+  if (startTime) return `vanaf ${startTime}`
+  return `tot ${endTime}`
+}
+
 const INFO_PARAGRAPHS = [
   'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Metingen met een snelheid tussen 35 en 80 km/u verschijnen live. Hogere metingen zijn helaas onbetrouwbaar en worden niet getoond',
-  'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid en kies via “Andere dag” een andere kalenderdag.',
+  'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid, kies een datum en filter optioneel op een tijdvak (start- en eindtijd).',
   'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag.',
   'Om fouten te voorkomen wordt er slechts één voertuig per 5 seconden gemeten. Hierdoor kan er een passage gemist worden',
   'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
@@ -504,6 +597,11 @@ function App() {
 
   const todayKey = toDayKey(now)
   const [selectedDay, setSelectedDay] = useState<string>(todayKey)
+  const [filterStartTime, setFilterStartTime] = useState('')
+  const [filterEndTime, setFilterEndTime] = useState('')
+
+  const timeFilterActive = filterStartTime.length > 0 || filterEndTime.length > 0
+  const timeFilterLabel = formatTimeFilterLabel(filterStartTime, filterEndTime)
 
   const selectableDays = useMemo(() => buildSelectableDays(now), [now])
   const otherDays = useMemo(
@@ -528,6 +626,8 @@ function App() {
       if (newDay === selectedDay) return
       if (rows.length > 0) pushDayStatsToFirebase(selectedDay, rows)
       setSelectedDay(newDay)
+      setFilterStartTime('')
+      setFilterEndTime('')
       setLoading(true)
       setRows([])
     },
@@ -664,8 +764,21 @@ function App() {
     return { rowsWithTimestamp, rowsWithoutTimestamp }
   }, [rows])
 
+  const timeFilteredRows = useMemo(() => {
+    if (!timeFilterActive) return rowsWithTimestamp
+    return rowsWithTimestamp.filter((r) =>
+      rowMatchesTimeFilter(r, selectedDay, filterStartTime, filterEndTime),
+    )
+  }, [
+    rowsWithTimestamp,
+    selectedDay,
+    filterStartTime,
+    filterEndTime,
+    timeFilterActive,
+  ])
+
   const sortedRows = useMemo(() => {
-    const next = [...rowsWithTimestamp]
+    const next = [...timeFilteredRows]
     if (sortBy === 'speed') {
       next.sort((a, b) => {
         const sa = readSpeedKmh(a.value) ?? Number.NEGATIVE_INFINITY
@@ -677,11 +790,16 @@ function App() {
     }
     next.sort((a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0))
     return next
-  }, [rowsWithTimestamp, sortBy])
+  }, [timeFilteredRows, sortBy])
 
   const dayStatsLive = useMemo(
-    () => computeDayStatsFromRows(rowsWithTimestamp),
-    [rowsWithTimestamp],
+    () => computeDayStatsFromRows(timeFilteredRows),
+    [timeFilteredRows],
+  )
+
+  const directionAverages = useMemo(
+    () => computeDirectionAverages(timeFilteredRows),
+    [timeFilteredRows],
   )
 
   const speedRecordSelectedDay = dayStatsLive.maxSpeed
@@ -742,10 +860,26 @@ function App() {
       {!loading &&
         !error &&
         rows.length > 0 &&
-        sortedRows.length === 0 && (
+        sortedRows.length === 0 &&
+        !timeFilterActive && (
           <div className="banner info" role="status">
             Er zijn {rows.length} event(s) voor deze dag, maar zonder bruikbare
             tijd. Zie <strong>Zonder bruikbare tijdstempel</strong> hieronder.
+          </div>
+        )}
+
+      {!loading &&
+        !error &&
+        timeFilterActive &&
+        rowsWithTimestamp.length > 0 &&
+        sortedRows.length === 0 && (
+          <div className="banner info" role="status">
+            Geen metingen in tijdvak{' '}
+            {timeFilterLabel ?? '—'} op{' '}
+            {selectedDay === todayKey
+              ? `vandaag (${formatDate(now)})`
+              : formatDayLabel(selectedDay)}
+            .
           </div>
         )}
 
@@ -756,13 +890,15 @@ function App() {
           <h2>
             {selectedDay === todayKey ? (
               <>
-                Vandaag ({formatDate(now)}) ·{' '}
+                Vandaag ({formatDate(now)})
+                {timeFilterLabel ? <> · {timeFilterLabel}</> : null} ·{' '}
                 <span className="count">{sortedRows.length}</span> metingen boven
                 35 km/u
               </>
             ) : (
               <>
-                {formatDayLabel(selectedDay)} ·{' '}
+                {formatDayLabel(selectedDay)}
+                {timeFilterLabel ? <> · {timeFilterLabel}</> : null} ·{' '}
                 <span className="count">{sortedRows.length}</span> metingen boven
                 35 km/u
               </>
@@ -789,9 +925,31 @@ function App() {
                 {formatFineEur(monthFineTotalEur)}
               </span>
             </div>
+            <div className="stat-card">
+              <span className="stat-label">Gem. snelheid ·&gt; Monster</span>
+              <span className="stat-value">
+                {formatAvgSpeedKmh(directionAverages.monster)}
+              </span>
+              {directionAverages.monsterCount > 0 && (
+                <span className="stat-sub">
+                  {directionAverages.monsterCount.toLocaleString('nl-NL')} metingen
+                </span>
+              )}
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Gem. snelheid ·&gt; Naaldwijk</span>
+              <span className="stat-value">
+                {formatAvgSpeedKmh(directionAverages.naaldwijk)}
+              </span>
+              {directionAverages.naaldwijkCount > 0 && (
+                <span className="stat-sub">
+                  {directionAverages.naaldwijkCount.toLocaleString('nl-NL')} metingen
+                </span>
+              )}
+            </div>
           </div>
-          <div className="day-filter">
-            <label htmlFor="day-select">Andere dag</label>
+          <div className="day-filter" role="search" aria-label="Filter op datum en tijd">
+            <label htmlFor="day-select">Datum</label>
             <select
               id="day-select"
               value={selectedDay}
@@ -804,26 +962,64 @@ function App() {
                 </option>
               ))}
             </select>
-            <label htmlFor="sort-select">Sorteer op</label>
-            <select
-              id="sort-select"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'time' | 'speed')}
-            >
-              <option value="time">Tijd (nieuwste eerst)</option>
-              <option value="speed">Snelheid (hoogste eerst)</option>
-            </select>
+            <label htmlFor="time-start">Starttijd</label>
+            <input
+              id="time-start"
+              type="time"
+              value={filterStartTime}
+              onChange={(e) => setFilterStartTime(e.target.value)}
+              aria-label="Starttijd"
+            />
+            <label htmlFor="time-end">Eindtijd</label>
+            <input
+              id="time-end"
+              type="time"
+              value={filterEndTime}
+              onChange={(e) => setFilterEndTime(e.target.value)}
+              aria-label="Eindtijd"
+            />
+            {timeFilterActive && (
+              <button
+                type="button"
+                className="filter-clear"
+                onClick={() => {
+                  setFilterStartTime('')
+                  setFilterEndTime('')
+                }}
+              >
+                Wis tijdvak
+              </button>
+            )}
+            <div className="filter-field filter-field--inline">
+              <label htmlFor="sort-select">Sorteer op</label>
+              <select
+                id="sort-select"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'time' | 'speed')}
+              >
+                <option value="time">Tijd (nieuwste eerst)</option>
+                <option value="speed">Snelheid (hoogste eerst)</option>
+              </select>
+            </div>
           </div>
         </div>
 
         {!loading && (
           <PeaksTable
             rows={sortedRows}
-            emptyHint={`Geen pieken met bekende tijd op ${
-              selectedDay === todayKey
-                ? `vandaag (${formatDate(now)})`
-                : formatDayLabel(selectedDay)
-            }.`}
+            emptyHint={
+              timeFilterActive
+                ? `Geen metingen in tijdvak ${timeFilterLabel ?? '—'} op ${
+                    selectedDay === todayKey
+                      ? `vandaag (${formatDate(now)})`
+                      : formatDayLabel(selectedDay)
+                  }.`
+                : `Geen pieken met bekende tijd op ${
+                    selectedDay === todayKey
+                      ? `vandaag (${formatDate(now)})`
+                      : formatDayLabel(selectedDay)
+                  }.`
+            }
           />
         )}
       </section>
