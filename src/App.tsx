@@ -428,53 +428,59 @@ function formatDayLabel(dayKey: string): string {
   }).format(dt)
 }
 
-function parseTimeOnDay(dayKey: string, timeStr: string): number | null {
-  const trimmed = timeStr.trim()
+function parseHourOnDay(dayKey: string, hourStr: string): number | null {
+  const trimmed = hourStr.trim()
   if (!trimmed) return null
-  const m = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed)
-  if (!m) return null
-  const [, h, mi, sec] = m
+  const hour = Number(trimmed)
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
   const dt = new Date(`${dayKey}T00:00:00`)
-  dt.setHours(Number(h), Number(mi), sec != null ? Number(sec) : 0, 0)
+  dt.setHours(hour, 0, 0, 0)
   return Number.isFinite(dt.getTime()) ? dt.getTime() : null
 }
 
-/** Eindtijd inclusief hele minuut (input type="time" levert HH:MM) */
-function parseEndTimeOnDay(dayKey: string, timeStr: string): number | null {
-  const startMs = parseTimeOnDay(dayKey, timeStr)
+/** Einduur inclusief heel uur (t/m 59:59) */
+function parseEndHourOnDay(dayKey: string, hourStr: string): number | null {
+  const startMs = parseHourOnDay(dayKey, hourStr)
   if (startMs == null) return null
-  if (/^\d{2}:\d{2}$/.test(timeStr.trim())) {
-    return startMs + 60_000 - 1
-  }
-  return startMs
+  return startMs + 3_600_000 - 1
 }
 
 function rowMatchesTimeFilter(
   row: Row,
   dayKey: string,
-  startTime: string,
-  endTime: string,
+  startHour: string,
+  endHour: string,
 ): boolean {
   const ms = row.timestampMs
   if (ms == null) return false
-  const startMs = parseTimeOnDay(dayKey, startTime)
-  const endMs = parseEndTimeOnDay(dayKey, endTime)
+  const startMs = parseHourOnDay(dayKey, startHour)
+  const endMs = parseEndHourOnDay(dayKey, endHour)
   if (startMs != null && endMs != null && startMs > endMs) return false
   if (startMs != null && ms < startMs) return false
   if (endMs != null && ms > endMs) return false
   return true
 }
 
-function formatTimeFilterLabel(startTime: string, endTime: string): string | null {
-  if (!startTime && !endTime) return null
-  if (startTime && endTime) return `${startTime}–${endTime}`
-  if (startTime) return `vanaf ${startTime}`
-  return `tot ${endTime}`
+function formatHourFilterLabel(hour: string): string {
+  return `${hour.padStart(2, '0')}:00`
 }
+
+function formatTimeFilterLabel(startHour: string, endHour: string): string | null {
+  if (!startHour && !endHour) return null
+  if (startHour && endHour) {
+    return `${formatHourFilterLabel(startHour)}–${formatHourFilterLabel(endHour)}`
+  }
+  if (startHour) return `vanaf ${formatHourFilterLabel(startHour)}`
+  return `tot ${formatHourFilterLabel(endHour)}`
+}
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) =>
+  String(i).padStart(2, '0'),
+)
 
 const INFO_PARAGRAPHS = [
   'Geestweg Live toont snelheidsmetingen van het verkeer op de Geestweg in Naaldwijk. Metingen met een snelheid tussen 35 en 80 km/u verschijnen live. Hogere metingen zijn helaas onbetrouwbaar en worden niet getoond',
-  'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid, kies een datum en filter optioneel op een tijdvak (start- en eindtijd).',
+  'In de tabel zie je per meting datum, tijd, snelheid, richting en een indicatief boetebedrag. Sorteer op tijd of snelheid, kies een datum en filter optioneel op uren (24-uurs, per heel uur).',
   'Het record van de dag is de hoogste gemeten snelheid op de geselecteerde dag.',
   'Om fouten te voorkomen wordt er slechts één voertuig per 5 seconden gemeten. Hierdoor kan er een passage gemist worden',
   'Boetebedragen zijn een rekenvoorbeeld en gebaseerd op de boetes 2026 voor een 30 km-weg. Een correctie van 3 km en een drempel van 4 km is de norm zodat boetes vanaf 37 km/u worden berekend.',
@@ -962,22 +968,36 @@ function App() {
                 </option>
               ))}
             </select>
-            <label htmlFor="time-start">Starttijd</label>
-            <input
+            <label htmlFor="time-start">Startuur</label>
+            <select
               id="time-start"
-              type="time"
+              className="filter-hour"
               value={filterStartTime}
               onChange={(e) => setFilterStartTime(e.target.value)}
-              aria-label="Starttijd"
-            />
-            <label htmlFor="time-end">Eindtijd</label>
-            <input
+              aria-label="Startuur (24-uurs)"
+            >
+              <option value="">—</option>
+              {HOUR_OPTIONS.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hour}:00
+                </option>
+              ))}
+            </select>
+            <label htmlFor="time-end">Einduur</label>
+            <select
               id="time-end"
-              type="time"
+              className="filter-hour"
               value={filterEndTime}
               onChange={(e) => setFilterEndTime(e.target.value)}
-              aria-label="Eindtijd"
-            />
+              aria-label="Einduur (24-uurs)"
+            >
+              <option value="">—</option>
+              {HOUR_OPTIONS.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hour}:00
+                </option>
+              ))}
+            </select>
             {timeFilterActive && (
               <button
                 type="button"

@@ -383,8 +383,8 @@
   color: var(--text-h);
 }
 
-.day-filter input[type='time'] {
-  min-width: 7.5rem;
+.day-filter select.filter-hour {
+  min-width: 5.5rem;
 }
 
 .filter-clear {
@@ -649,6 +649,11 @@
   .day-filter input[type='time'] {
     width: 100%;
     min-width: 0;
+  }
+
+  .day-filter select.filter-hour {
+    width: auto;
+    min-width: 5.5rem;
   }
 
   .filter-field--inline select {
