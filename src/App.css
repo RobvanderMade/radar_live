@@ -331,6 +331,10 @@
   color: var(--accent);
 }
 
+.stat-card--warn .stat-value {
+  color: #c2410c;
+}
+
 .stat-sub {
   font-size: 0.72rem;
   line-height: 1.2;
@@ -354,7 +358,13 @@
 
 @media (min-width: 900px) {
   .stats-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 

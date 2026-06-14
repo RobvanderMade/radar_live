@@ -9,6 +9,7 @@ import {
   remove,
   set,
   startAt,
+  update,
   type Database,
 } from 'firebase/database'
 import { getRtdb } from './firebase'
@@ -54,13 +55,19 @@ function parseStoredDayFine(val: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+function parseStoredPassageCount(val: unknown): number | null {
+  if (val == null || typeof val !== 'object') return null
+  const n = Number((val as Record<string, unknown>).passageCount)
+  return Number.isFinite(n) ? n : null
+}
+
 async function persistDayStatsToFirebase(
   db: Database,
   statsBase: string,
   dayKey: string,
   stats: DayStats,
 ): Promise<void> {
-  await set(ref(db, `${statsBase}/days/${dayKey}`), {
+  await update(ref(db, `${statsBase}/days/${dayKey}`), {
     totalFineEur: stats.totalFineEur,
     maxSpeedKmh: stats.maxSpeed,
     updatedAt: new Date().toISOString(),
@@ -148,6 +155,22 @@ function formatAvgSpeedKmh(avg: number | null): string {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   })} km/u`
+}
+
+function over35PercentOfTotal(
+  over35Count: number,
+  passageCount: number | null,
+): number | null {
+  if (passageCount == null || passageCount <= 0) return null
+  return (over35Count / passageCount) * 100
+}
+
+function formatPercent(value: number | null): string {
+  if (value == null) return '—'
+  return `${value.toLocaleString('nl-NL', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}%`
 }
 
 function toMillis(ts: unknown): number | null {
@@ -599,6 +622,7 @@ function App() {
   const [sortBy, setSortBy] = useState<'time' | 'speed'>('time')
   const [infoOpen, setInfoOpen] = useState(false)
   const [monthFineTotalEur, setMonthFineTotalEur] = useState(0)
+  const [dayPassageCount, setDayPassageCount] = useState<number | null>(null)
   const purgeStartedRef = useRef(false)
 
   const todayKey = toDayKey(now)
@@ -679,6 +703,19 @@ function App() {
       unsubDays()
     }
   }, [statsBase, now])
+
+  useEffect(() => {
+    const db = getRtdb()
+    const unsubDay = onValue(
+      ref(db, `${statsBase}/days/${selectedDay}`),
+      (snap) => {
+        setDayPassageCount(parseStoredPassageCount(snap.val()))
+      },
+    )
+    return () => {
+      unsubDay()
+    }
+  }, [statsBase, selectedDay])
 
   useEffect(() => {
     let unsubConnected: (() => void) | undefined
@@ -810,6 +847,8 @@ function App() {
 
   const speedRecordSelectedDay = dayStatsLive.maxSpeed
   const totalFineSelectedDay = dayStatsLive.totalFineEur
+  const over35DayCount = rowsWithTimestamp.length
+  const over35Percent = over35PercentOfTotal(over35DayCount, dayPassageCount)
 
   return (
     <div className="app">
@@ -911,6 +950,24 @@ function App() {
             )}
           </h2>
           <div className="stats-grid" role="group" aria-label="Statistieken">
+            <div className="stat-card">
+              <span className="stat-label">Totaal aantal pasages incl. fietsers</span>
+              <span className="stat-value">
+                {dayPassageCount != null
+                  ? dayPassageCount.toLocaleString('nl-NL')
+                  : '—'}
+              </span>
+            </div>
+            <div className="stat-card stat-card--warn">
+              <span className="stat-label">35+ km/u van totaal</span>
+              <span className="stat-value">{formatPercent(over35Percent)}</span>
+              {over35DayCount > 0 && dayPassageCount != null && (
+                <span className="stat-sub">
+                  {over35DayCount.toLocaleString('nl-NL')} van{' '}
+                  {dayPassageCount.toLocaleString('nl-NL')}
+                </span>
+              )}
+            </div>
             <div className="stat-card">
               <span className="stat-label">Record van de dag</span>
               <span className="stat-value">
