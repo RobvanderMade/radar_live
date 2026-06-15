@@ -412,7 +412,7 @@ function fineEurForSpeedKmh(speedKmh: number): number {
 }
 
 function formatFineEur(amount: number): string {
-  return `€ ${amount.toLocaleString('nl-NL')}`
+  return `€ ${amount.toLocaleString('nl-NL')},-`
 }
 
 const dateFmtNl = new Intl.DateTimeFormat('nl-NL', { dateStyle: 'short' })
